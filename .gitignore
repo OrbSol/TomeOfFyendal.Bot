@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+# SECRETS — never commit. Real values live in Vault or environment variables.
+# Only appsettings.json (no secrets) and appsettings.Example.json are tracked.
+# ---------------------------------------------------------------------------
+appsettings.*.json
+!appsettings.Example.json
+secrets.json
+*.secrets.json
+.env
+.env.*
+*.pfx
+*.p12
+*.pem
+*.key
+*.snk
+id_rsa*
+*.ppk
+vault-*.sh
+*.tfvars
+
+# ASP.NET Core data-protection keys (encrypt the sign-in cookie)
+keys/
+
+# Local databases, dumps and deploy artifacts
+*.sqlite
+*.db
+*.bak
+*.mdf
+*.ldf
+*.tar.gz
+*.zip
+publish/
+publish_out/
+deploy-out/
+
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.suo
+*.userprefs
+.vs/
+.vscode/
+.idea/
+*.swp
+TestResults/
+coverage*/
+*.log
+logs/
+
+# Node (if a front-end build is ever added)
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/

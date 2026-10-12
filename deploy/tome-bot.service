@@ -1,0 +1,36 @@
+# systemd unit for the Tome of Fyendal Discord bot. Install (as root, once):
+#   sudo cp tome-bot.service /etc/systemd/system/tome-bot.service
+#   sudo mkdir -p /etc/systemd/system/tome-bot.service.d /var/www/tome-bot/publish
+#   sudo chown -R www-data:www-data /var/www/tome-bot
+#   # Vault AppRole credentials go in a root-only drop-in, never in the repo:
+#   sudo tee /etc/systemd/system/tome-bot.service.d/vault.conf >/dev/null <<'EOF'
+#   [Service]
+#   Environment=VAULT_ROLE_ID=<role-id>
+#   Environment=VAULT_SECRET_ID=<secret-id>
+#   EOF
+#   sudo chmod 600 /etc/systemd/system/tome-bot.service.d/vault.conf
+#   sudo systemctl daemon-reload && sudo systemctl enable --now tome-bot
+
+[Unit]
+Description=Tome of Fyendal Discord bot (read-only marketplace listener)
+After=network.target
+
+[Service]
+WorkingDirectory=/var/www/tome-bot/publish
+ExecStart=/usr/bin/dotnet /var/www/tome-bot/publish/TomeOfFyendal.Bot.dll
+Restart=always
+RestartSec=30
+SyslogIdentifier=tome-bot
+User=www-data
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+
+# Hardening: no listening ports, nothing on disk to write.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target

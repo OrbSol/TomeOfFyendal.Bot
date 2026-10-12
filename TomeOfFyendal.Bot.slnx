@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TomeOfFyendal.Bot/TomeOfFyendal.Bot.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TomeOfFyendal.Bot.Tests/TomeOfFyendal.Bot.Tests.csproj" />
+  </Folder>
+</Solution>

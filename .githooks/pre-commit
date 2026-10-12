@@ -1,0 +1,41 @@
+#!/bin/sh
+# Blocks commits that contain secrets. Enable once per clone:
+#   git config core.hooksPath .githooks
+# Runs gitleaks too when it is installed (https://github.com/gitleaks/gitleaks).
+
+fail=0
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# 1) Files that must never be committed.
+for f in $staged; do
+  case "$f" in
+    *appsettings.Example.json) ;;
+    *appsettings.*.json|*.env|*.env.*|*.pfx|*.p12|*.pem|*.key|*secrets.json|keys/*|*/keys/*)
+      echo "BLOCKED: $f must not be committed (secrets file)"; fail=1 ;;
+  esac
+done
+
+# 2) Secret-shaped content in the staged changes (added lines only).
+patterns='[MN][A-Za-z0-9]{23,26}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,38}'      # Discord bot token
+patterns="$patterns|(Password|Pwd)[[:space:]]*=[[:space:]]*[^;\"'[:space:]]{3,}"  # connection-string password
+patterns="$patterns|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+patterns="$patterns|AKIA[0-9A-Z]{16}"                                          # AWS access key id
+patterns="$patterns|(client_secret|ClientSecret|BotToken|ApiKey|SecretId|RoleId)\"?[[:space:]]*[:=][[:space:]]*\"[A-Za-z0-9_.\-]{12,}\""
+patterns="$patterns|hvs\.[A-Za-z0-9_-]{20,}"                                   # Vault token
+hits=$(git diff --cached -U0 | grep '^+' | grep -v '^+++' | grep -E "$patterns")
+if [ -n "$hits" ]; then
+  echo "BLOCKED: staged changes contain what looks like a secret:"
+  echo "$hits" | sed -E 's/(.{12}).*/\1… (redacted)/'
+  fail=1
+fi
+
+# 3) gitleaks, when available.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --no-banner || fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "Commit aborted. Move the value to Vault, an environment variable or dotnet user-secrets."
+  exit 1
+fi
+exit 0
