@@ -140,7 +140,18 @@ namespace TomeOfFyendal.Bot
             var messageId = unchecked((long)msg.Id);
             var listing = await db.FabDiscordListings.Include(l => l.Items).FirstOrDefaultAsync(l => l.MessageId == messageId, ct);
 
-            if (parsed.IsEmpty)
+            // A "W:" line inside a sell post (or "H:" inside a buy post) is a different kind of listing;
+            // items carry no type of their own, so those lines are left out rather than mislabelled.
+            // Trade posts keep both sides.
+            var candidates = parsed.Type == ListingType.WTT
+                ? parsed.Items
+                : parsed.Items.Where(i => i.LineType is null || i.LineType == parsed.Type || i.LineType == ListingType.WTT).ToList();
+            // Only lines that match a real card are kept: shipping notes, "Others:", playmats and typos stay in Discord.
+            var kept = new List<(ParsedItem Item, FabCardResolver.Resolved Card)>();
+            foreach (var item in candidates)
+                if (await resolver.ResolveAsync(item, ct) is { } card) kept.Add((item, card));
+
+            if (parsed.IsEmpty || kept.Count == 0)
             {
                 if (listing is not null) { listing.Status = "Removed"; listing.RemovedAt = now; listing.UpdatedAt = now; await db.SaveChangesAsync(ct); }
                 return;
@@ -182,39 +193,36 @@ namespace TomeOfFyendal.Bot
             listing.Status = "Active";
             listing.RemovedAt = null;
             listing.HasImage = msg.Attachments.Count > 0;
+            listing.MarketPercent = (byte?)parsed.MarketPercent;
             listing.UpdatedAt = now;
 
             // Reported first: FlagReason is truncated to 200 characters.
             var flags = new List<string>();
             if (seller.Watchlisted) flags.Add(ReportedFlag);
             if (parsed.HasOffPlatformPayment) flags.Add("payment outside Discord/PayPal G&S");
+            if (parsed.Type == ListingType.WTS && parsed.MarketPercent is int pct && pct <= 100 * (1 - _settings.UnderMarketFlagFraction))
+                flags.Add($"asks {pct}% of TCGplayer market");
 
-            // A "W:" line inside a sell post (or "H:" inside a buy post) is a different kind of listing;
-            // items carry no type of their own, so those lines are left out rather than mislabelled.
-            // Trade posts keep both sides.
-            var kept = parsed.Type == ListingType.WTT
-                ? parsed.Items
-                : parsed.Items.Where(i => i.LineType is null || i.LineType == parsed.Type || i.LineType == ListingType.WTT).ToList();
-
-            foreach (var item in kept)
+            foreach (var (item, resolved) in kept)
             {
-                var resolved = await resolver.ResolveAsync(item, ct);
                 var row = new FabDiscordListingItem
                 {
-                    PrintingUniqueId = resolved?.PrintingUniqueId,
-                    ProductId = resolved?.ProductId,
-                    CardName = Trunc(resolved?.CardName ?? item.CardName, 200)!,
-                    SetCode = Trunc(resolved?.SetId ?? item.SetCode, 10),
-                    Foiling = item.Foiling ?? resolved?.Foiling,
+                    PrintingUniqueId = resolved.PrintingUniqueId,
+                    ProductId = resolved.ProductId,
+                    CardName = Trunc(resolved.CardName, 200)!,
+                    SetCode = Trunc(resolved.SetId ?? item.SetCode, 10),
+                    Foiling = item.Foiling ?? resolved.Foiling,
                     Condition = item.Condition,
+                    Variant = Trunc(item.Variant, 20),
                     Price = item.Price,
                     Currency = item.Currency,
                     Qty = item.Qty,
-                    Confidence = (byte)Math.Min(100, item.Confidence + (resolved is null ? 0 : 15)),
+                    Confidence = (byte)Math.Min(100, item.Confidence + 15),
                 };
                 listing.Items.Add(row);
 
-                if (parsed.Type == ListingType.WTS && item.Currency == "USD" && item.Price is decimal ask && resolved?.ProductId is int pid)
+                // A Marvel, extended art, graded copy... is priced on its own; the catalog cannot tell its market yet.
+                if (parsed.Type == ListingType.WTS && item.Variant is null && item.Currency == "USD" && item.Price is decimal ask && resolved.ProductId is int pid)
                 {
                     var market = await LatestMarketAsync(db, pid, row.Foiling, ct);
                     if (market is decimal m && m > 0 && ask < m * (1 - _settings.UnderMarketFlagFraction))
@@ -222,7 +230,7 @@ namespace TomeOfFyendal.Bot
                 }
             }
             listing.ItemCount = listing.Items.Count;
-            listing.Summary = DiscordListingParser.Summarize(parsed.Type, kept);
+            listing.Summary = DiscordListingParser.Summarize(parsed.Type, kept.Select(k => k.Item).ToList());
             listing.Flagged = flags.Count > 0;
             listing.FlagReason = flags.Count > 0 ? Trunc(string.Join("; ", flags.Distinct()), 200) : null;
 
@@ -262,6 +270,15 @@ namespace TomeOfFyendal.Bot
             var n = await db.FabDiscordListings.Where(l => l.Status == "Active" && l.PostedAt < cutoff)
                 .ExecuteUpdateAsync(s => s.SetProperty(l => l.Status, "Expired").SetProperty(l => l.UpdatedAt, now), ct);
             if (n > 0) _logger.LogInformation("Expired {Count} listings older than {Days} days", n, _settings.ListingExpireDays);
+
+            // Retention promised in the privacy policy: off the board for PurgeAfterDays -> deleted (items cascade).
+            // A seller row survives only while it has listings, an opt-out to honour, or a report.
+            var purgeBefore = now.AddDays(-_settings.PurgeAfterDays);
+            var purged = await db.FabDiscordListings.Where(l => l.Status != "Active" && l.UpdatedAt < purgeBefore).ExecuteDeleteAsync(ct);
+            var sellers = await db.FabDiscordSellers
+                .Where(s => !s.OptedOut && !s.Watchlisted && !db.FabDiscordListings.Any(l => l.AuthorId == s.AuthorId))
+                .ExecuteDeleteAsync(ct);
+            if (purged + sellers > 0) _logger.LogInformation("Purged {Listings} old listings and {Sellers} seller rows", purged, sellers);
         }
 
         private const string ReportedFlag = "reported before in #paypal-watchlist";

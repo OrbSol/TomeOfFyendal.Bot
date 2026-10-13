@@ -5,7 +5,7 @@ namespace TomeOfFyendal.Bot.Data
 {
     /// <summary>
     /// The only tables the bot touches in the shared Tome of Fyendal database. It writes the three
-    /// Discord tables and reads the card catalog and daily prices. The schema is owned by the website's
+    /// Discord tables and reads the card catalog, TCGplayer product names and daily prices. The schema is owned by the website's
     /// migrations; this context never creates or changes tables, and its SQL login cannot (see deploy/db-access.sql).
     /// </summary>
     public class BotDbContext : DbContext
@@ -21,6 +21,7 @@ namespace TomeOfFyendal.Bot.Data
         public DbSet<FabCard> FabCards => Set<FabCard>();
         public DbSet<FabPrinting> FabPrintings => Set<FabPrinting>();
         public DbSet<FabPriceSnapshot> FabPriceSnapshots => Set<FabPriceSnapshot>();
+        public DbSet<FabTcgProduct> FabTcgProducts => Set<FabTcgProduct>();
 
         protected override void OnModelCreating(ModelBuilder b)
         {
@@ -62,6 +63,8 @@ namespace TomeOfFyendal.Bot.Data
         /// <summary>Generated one-line description, never the member's own text.</summary>
         [StringLength(300)] public string? Summary { get; set; }
         public int ItemCount { get; set; }
+        /// <summary>"85% TCGP": cards without their own price are offered at this percent of TCGplayer market.</summary>
+        public byte? MarketPercent { get; set; }
         public bool HasImage { get; set; }
         public bool Flagged { get; set; }
         [StringLength(200)] public string? FlagReason { get; set; }
@@ -84,6 +87,8 @@ namespace TomeOfFyendal.Bot.Data
         [StringLength(2)] public string? Foiling { get; set; }
         /// <summary>NM, LP, MP, HP or DMG.</summary>
         [StringLength(4)] public string? Condition { get; set; }
+        /// <summary>Special version named in the post (Marvel, EA, AA, FA, JP, Promo, Sealed, Graded). Not compared with market.</summary>
+        [StringLength(20)] public string? Variant { get; set; }
         public decimal? Price { get; set; }
         [Required, StringLength(3)] public string Currency { get; set; } = "USD";
         public int Qty { get; set; } = 1;
@@ -129,6 +134,16 @@ namespace TomeOfFyendal.Bot.Data
         public string? TcgPlayerProductId { get; set; }
         public bool IsBackFace { get; set; }
         public FabCard? Card { get; set; }
+    }
+
+    /// <summary>TCGplayer product (read only; from the website's daily tcgcsv sync). Names cover new sets the card dataset lacks.</summary>
+    public class FabTcgProduct
+    {
+        [Key] public int ProductId { get; set; }
+        public string Name { get; set; } = string.Empty;
+        /// <summary>Printing number, e.g. IAR090. Null for sealed product.</summary>
+        public string? Number { get; set; }
+        public bool IsSingle { get; set; }
     }
 
     /// <summary>Daily TCGplayer market per product and finish (read only; collected by the website).</summary>

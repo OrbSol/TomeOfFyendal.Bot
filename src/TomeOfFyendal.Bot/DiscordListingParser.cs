@@ -6,11 +6,13 @@ namespace TomeOfFyendal.Bot
 {
     public enum ListingType { Unknown, WTS, WTB, WTT }
 
+    /// <param name="Variant">Special version named in the post (Marvel, EA, AA, FA, JP, Promo, Sealed, Graded); null for a regular copy.</param>
     public sealed record ParsedItem(
         string CardName, string? SetCode, string? Number, string? Foiling, string? Condition, string? Pitch, string? Edition,
-        decimal? Price, string Currency, int Qty, byte Confidence, ListingType? LineType);
+        decimal? Price, string Currency, int Qty, byte Confidence, ListingType? LineType, string? Variant = null);
 
-    public sealed record ParsedListing(ListingType Type, IReadOnlyList<ParsedItem> Items, bool HasOffPlatformPayment)
+    /// <param name="MarketPercent">"85% TCGP": cards without their own price are offered at this percent of TCGplayer market.</param>
+    public sealed record ParsedListing(ListingType Type, IReadOnlyList<ParsedItem> Items, bool HasOffPlatformPayment, int? MarketPercent = null)
     {
         public bool IsEmpty => Type == ListingType.Unknown || Items.Count == 0;
     }
@@ -30,14 +32,19 @@ namespace TomeOfFyendal.Bot
         private static readonly Regex Wtt = new(@"(?<![a-z])(wtt|ft|for trade|trading|trade)(?![a-z])", Opt);
 
         private static readonly Regex LineHeadRx = new(@"^\s*(?<h>wts|wtb|wtt|fs|lf|ft|iso|h|w|have|want|haves|wants|selling|buying|for sale|looking for|trade|for trade)\s*[:\-–]?\s+", Opt);
-        private static readonly Regex PriceRx = new(@"(?:\$\s?(?<usd>\d{1,5}(?:[.,]\d{1,2})?))|(?:(?<usd2>\d{1,5}(?:[.,]\d{1,2})?)\s?(?:usd|dollars|bucks|\$))|(?:€\s?(?<eur>\d{1,5}(?:[.,]\d{1,2})?))|(?:(?<eur2>\d{1,5}(?:[.,]\d{1,2})?)\s?(?:€|eur|euros?))|(?:£\s?(?<gbp>\d{1,5}(?:[.,]\d{1,2})?))|(?:(?<gbp2>\d{1,5}(?:[.,]\d{1,2})?)\s?(?:£|gbp))", Opt);
+        // Amount: "2,000" / "1,100.50" (thousands) before "25,50" / "12.5" (decimals). A bare number counts only before OBO.
+        private const string Num = @"\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d{1,6}(?:[.,]\d{1,2})?";
+        private static readonly Regex PriceRx = new($@"(?:\$\s?(?<usd>{Num}))|(?:(?<usd2>{Num})\s?(?:usd|dollars|bucks|\$))|(?:€\s?(?<eur>{Num}))|(?:(?<eur2>{Num})\s?(?:€|eur|euros?))|(?:£\s?(?<gbp>{Num}))|(?:(?<gbp2>{Num})\s?(?:£|gbp))|(?:(?<![\w.,])(?<usd3>{Num})\s*(?=obo(?![a-z])|o\.b\.o))", Opt);
+        private static readonly Regex ThousandsRx = new(@"^\d{1,3}(?:,\d{3})+", RegexOptions.Compiled);
         private static readonly Regex QtyRx = new(@"(?:(?<![a-z\d])(?<a>\d{1,2})\s?x(?![a-z]))|(?:(?<![a-z])x\s?(?<b>\d{1,2})(?!\d))", Opt);
         private static readonly Regex FoilRx = new(@"(?<![a-z])(cold[\s-]?foil|cf|rainbow[\s-]?foil|rf|gold[\s-]?foil|gf|non[\s-]?foil|nf|regular|standard)(?![a-z])", Opt);
         private static readonly Regex CondRx = new(@"(?<![a-z])(nm|near[\s-]?mint|lp|lightly[\s-]?played|mp|moderately[\s-]?played|hp|heavily[\s-]?played|dmg|damaged)(?![a-z])", Opt);
         // Pitch colour only counts when bracketed "(red)" or trailing the name "Snatch red"; a colour
         // inside a name ("Red in the Ledger") is left alone.
-        private static readonly Regex PitchParenRx = new(@"[\(\[]\s*(?<p>red|yellow|blue)\s*[\)\]]", Opt);
-        private static readonly Regex PitchTailRx = new(@"(?<=\s[-–]?\s?)(?<p>red|yellow|blue)\s*$", Opt);
+        private static readonly Regex PitchParenRx = new(@"[\(\[]\s*(?<p>red|yellow|yel|blue|blu)\s*[\)\]]", Opt);
+        private static readonly Regex PitchTailRx = new(@"(?<=\s[-–]?\s?)(?<p>red|yellow|yel|blue|blu)[\s:\-–]*$", Opt);
+        // A finish on its own line, with an optional note: "Gold Foils ( willing to trade )", "CF:".
+        private static readonly Regex FinishHeaderRx = new(@"^(?:(?:cold|rainbow|gold|non)[\s-]?foils?|cf|rf|gf|nf)\s*(?:\(.*\))?\s*:?$", Opt);
         // Bare set code without a number ("Crown of Providence WTR"): three capitals, case-sensitive.
         private static readonly Regex BareSetRx = new(@"(?<![A-Za-z\d])(?<set>[A-Z]{3})(?![A-Za-z\d])", RegexOptions.CultureInvariant | RegexOptions.Compiled);
         private static readonly Regex EditionRx = new(@"(?<![a-z])(1st\s?(?:ed(?:ition)?)?|first\s?ed(?:ition)?|unlimited|unl|alpha)(?![a-z])", Opt);
@@ -52,8 +59,20 @@ namespace TomeOfFyendal.Bot
         // A header word on its own, optionally followed by a bracketed note: "WTS", "H:", "WTS (all NM, shipped CONUS)".
         private static readonly Regex HeaderOnlyRx = new(@"^(?<h>wts|wtb|wtt|fs|lf|ft|h|w|have|want|selling|buying|for sale|looking for|trade)[\s:!.-]*(?:\(.*\))?[\s:!.,-]*$", Opt);
         // Everything from the first noise phrase to the end of the line is not part of a card name.
-        private static readonly Regex NoiseRx = new(@"(?<![a-z])(shipped|shipping|ship|each|ea|obo|o\.b\.o\.?|or best offer|firm|pics?|photos?|paying|plus shipping|\+\s?shipping|us only|usa only|conus|g&s|f&f|paypal|venmo|cashapp|cash app|zelle|only|dm me|pm me|taking offers|offers?|too|also|as well|or trade|for trade)(?![a-z]).*$", Opt);
+        // Uppercase "EA" (extended art) is taken by VariantCapsRx first, so "ea" here only means "each".
+        private static readonly Regex NoiseRx = new(@"(?<![a-z])(shipped|shipping|ship|each|ea|per|playset|for a playset|w/[a-z]*|tracked|obo|o\.b\.o\.?|or best offer|firm|pics?|photos?|paying|plus shipping|\+\s?shipping|us only|usa only|conus|g&s|f&f|paypal|venmo|cashapp|cash app|zelle|only|dm me|pm me|taking offers|offers?|too|also|as well|or trade|for trade)(?![a-z]).*$", Opt);
         private static readonly Regex AfterCommaRx = new(@"\s*,.*$", Opt);
+        // Shipping region or "85% TCG" pricing at the start of a line: "CONUS marvel soul harvest - $85".
+        private static readonly Regex LeadNoiseRx = new(@"^(?:(?:conus|usa|us|eu|uk|obo|preferred|\d{1,3}\s?%(?:\s?(?:of\s)?tcg(?:p|player)?)?)(?![a-z])[\s\-–:,]*)+", Opt);
+        // Special versions. Words match any case; EA/AA/FA only in capitals, so "ea" (each) is not one.
+        private static readonly Regex VariantWordRx = new(@"(?<![a-z])(?<v>marvel|extended\s?art|alt(?:ernate)?\s?art|full\s?art|promo|sealed|japanese|jp|gem\s?mint\s?10|(?:psa|bgs|cgc|pcg)\s?\d{1,2}(?:\.\d)?)(?![a-z])", Opt);
+        private static readonly Regex VariantCapsRx = new(@"(?<![A-Za-z])(?<v>EA|AA|FA)(?![A-Za-z])", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        // ~~struck through~~ means sold; so does a line that says "sold".
+        private static readonly Regex StrikeRx = new(@"~~.*?~~(?:\s*sold(?![a-z]))?", Opt);
+        private static readonly Regex SoldRx = new(@"(?<![a-z])sold(?![a-z])", Opt);
+        private static readonly Regex EmptyBracketsRx = new(@"\(\s*\)|\[\s*\]", Opt);
+        // "85% TCGP", "90% of TCGplayer", "80% market".
+        private static readonly Regex MarketPercentRx = new(@"(?<![\d.])(?<pct>\d{2,3})\s?%\s?(?:of\s)?(?:tcg(?:p|player)?|market|mkt)(?![a-z])", Opt);
 
         public static ParsedListing Parse(string? content)
         {
@@ -63,15 +82,18 @@ namespace TomeOfFyendal.Bot
             var text = MentionRx.Replace(content, " ");
             var hasPayment = PaymentRx.IsMatch(text);
             text = UrlRx.Replace(text, " ");
+            text = StrikeRx.Replace(text, " ");
 
             var type = DetectType(text);
             var items = new List<ParsedItem>();
             ListingType? section = null;
+            // "RF 1st ed:" sets the finish and edition for the lines under it; "Others:" clears them.
+            string? sectionFoil = null, sectionEdition = null;
 
             foreach (var rawLine in SplitLines(text))
             {
                 var line = Clean(rawLine);
-                if (line.Length < 3) continue;
+                if (line.Length < 3 || SoldRx.IsMatch(line)) continue;
                 var ho = HeaderOnlyRx.Match(line);
                 if (ho.Success) { section = HeaderType(ho.Groups["h"].Value); continue; }
 
@@ -79,7 +101,16 @@ namespace TomeOfFyendal.Bot
                 var hm = LineHeadRx.Match(line);
                 if (hm.Success) { lineType = HeaderType(hm.Groups["h"].Value); line = line[hm.Length..]; if (section is null) section = lineType; }
 
-                var item = ParseLine(line, lineType);
+                if ((line.EndsWith(':') || FinishHeaderRx.IsMatch(line)) && !PriceRx.IsMatch(line))
+                {
+                    // "Gold Foils" is plural, which FoilRx (whole words) does not take; strip the s first.
+                    var head = Regex.Replace(line, @"(?<=foil)s(?![a-z])", "", RegexOptions.IgnoreCase);
+                    sectionFoil = FoilRx.Match(head) is { Success: true } sf ? NormalizeFoil(sf.Groups[1].Value) : null;
+                    sectionEdition = EditionRx.Match(line) is { Success: true } se ? EditionOf(se.Groups[1].Value) : null;
+                    continue;
+                }
+
+                var item = ParseLine(line, lineType, sectionFoil, sectionEdition);
                 if (item is not null) items.Add(item);
                 if (items.Count >= 40) break;
             }
@@ -87,7 +118,8 @@ namespace TomeOfFyendal.Bot
             if (type == ListingType.Unknown && items.Any(i => i.LineType.HasValue))
                 type = items.First(i => i.LineType.HasValue).LineType!.Value;
 
-            return new ParsedListing(type, items, hasPayment);
+            int? percent = MarketPercentRx.Match(text) is { Success: true } pm && int.TryParse(pm.Groups["pct"].Value, out var pct) && pct is >= 30 and <= 150 ? pct : null;
+            return new ParsedListing(type, items, hasPayment, percent);
         }
 
         public static string? NormalizeFoil(string? raw)
@@ -158,9 +190,31 @@ namespace TomeOfFyendal.Bot
             return s;
         }
 
-        private static ParsedItem? ParseLine(string line, ListingType? lineType)
+        private static string EditionOf(string raw)
         {
-            var work = line;
+            var e = raw.ToLowerInvariant();
+            return e.StartsWith("1st") || e.StartsWith("first") ? "1st" : e.StartsWith("unl") ? "Unlimited" : "Alpha";
+        }
+
+        private static string? VariantLabel(string raw)
+        {
+            var v = raw.ToLowerInvariant().Replace(" ", "");
+            return v switch
+            {
+                "marvel" => "Marvel",
+                "ea" or "extendedart" => "EA",
+                "aa" or "altart" or "alternateart" => "AA",
+                "fa" or "fullart" => "FA",
+                "promo" => "Promo",
+                "sealed" => "Sealed",
+                "jp" or "japanese" => "JP",
+                _ => "Graded",
+            };
+        }
+
+        private static ParsedItem? ParseLine(string line, ListingType? lineType, string? sectionFoil = null, string? sectionEdition = null)
+        {
+            var work = LeadNoiseRx.Replace(line, "");
             byte confidence = 0;
 
             decimal? price = null; var currency = "USD";
@@ -170,11 +224,13 @@ namespace TomeOfFyendal.Bot
                 string raw;
                 if (pm.Groups["usd"].Success) raw = pm.Groups["usd"].Value;
                 else if (pm.Groups["usd2"].Success) raw = pm.Groups["usd2"].Value;
+                else if (pm.Groups["usd3"].Success) raw = pm.Groups["usd3"].Value;
                 else if (pm.Groups["eur"].Success) { raw = pm.Groups["eur"].Value; currency = "EUR"; }
                 else if (pm.Groups["eur2"].Success) { raw = pm.Groups["eur2"].Value; currency = "EUR"; }
                 else if (pm.Groups["gbp"].Success) { raw = pm.Groups["gbp"].Value; currency = "GBP"; }
                 else { raw = pm.Groups["gbp2"].Value; currency = "GBP"; }
-                if (decimal.TryParse(raw.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var p) && p > 0 && p < 100000)
+                raw = ThousandsRx.IsMatch(raw) ? raw.Replace(",", "") : raw.Replace(',', '.');
+                if (decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var p) && p > 0 && p < 100000)
                 {
                     price = decimal.Round(p, 2);
                     confidence += 25;
@@ -191,6 +247,14 @@ namespace TomeOfFyendal.Bot
                 work = work.Remove(qm.Index, qm.Length).Insert(qm.Index, " ");
             }
 
+            // Variants before noise: "EA" must be read as extended art before "ea" (each) cuts the line.
+            var variants = new List<string>();
+            foreach (var rx in new[] { VariantWordRx, VariantCapsRx })
+            {
+                work = rx.Replace(work, m => { variants.Add(VariantLabel(m.Groups["v"].Value)!); return " "; });
+            }
+            var variant = variants.Count == 0 ? null : string.Join(" ", variants.Distinct());
+
             string? foil = null;
             var fm = FoilRx.Match(work);
             if (fm.Success) { foil = NormalizeFoil(fm.Groups[1].Value); if (foil != null) confidence += 10; work = work.Remove(fm.Index, fm.Length).Insert(fm.Index, " "); }
@@ -203,8 +267,7 @@ namespace TomeOfFyendal.Bot
             var em = EditionRx.Match(work);
             if (em.Success)
             {
-                var e = em.Groups[1].Value.ToLowerInvariant();
-                edition = e.StartsWith("1st") || e.StartsWith("first") ? "1st" : e.StartsWith("unl") ? "Unlimited" : "Alpha";
+                edition = EditionOf(em.Groups[1].Value);
                 work = work.Remove(em.Index, em.Length).Insert(em.Index, " ");
             }
 
@@ -228,7 +291,7 @@ namespace TomeOfFyendal.Bot
             if (!ptm.Success) ptm = PitchTailRx.Match(work);
             if (ptm.Success)
             {
-                pitch = ptm.Groups["p"].Value.ToLowerInvariant() switch { "red" => "1", "yellow" => "2", _ => "3" };
+                pitch = ptm.Groups["p"].Value.ToLowerInvariant()[0] switch { 'r' => "1", 'y' => "2", _ => "3" };
                 work = work.Remove(ptm.Index, ptm.Length).Insert(ptm.Index, " ");
             }
 
@@ -238,7 +301,7 @@ namespace TomeOfFyendal.Bot
                 if (bs.Success) { set = bs.Groups["set"].Value; work = work.Remove(bs.Index, bs.Length).Insert(bs.Index, " "); }
             }
 
-            var name = TrailingJunkRx.Replace(SpaceRx.Replace(work, " "), "").Trim();
+            var name = TrailingJunkRx.Replace(SpaceRx.Replace(EmptyBracketsRx.Replace(work, " "), " "), "").Trim();
             name = BalanceParens(name);
             if (name.Length > 200) name = name[..200];
 
@@ -248,9 +311,9 @@ namespace TomeOfFyendal.Bot
 
             return new ParsedItem(
                 CardName: name.Length >= 3 ? name : number!,
-                SetCode: set, Number: number, Foiling: foil, Condition: cond, Pitch: pitch, Edition: edition,
+                SetCode: set, Number: number, Foiling: foil ?? sectionFoil, Condition: cond, Pitch: pitch, Edition: edition ?? sectionEdition,
                 Price: price, Currency: currency, Qty: qty, Confidence: Math.Min(confidence, (byte)100),
-                LineType: lineType);
+                LineType: lineType, Variant: variant);
         }
 
         /// <summary>"Cintari Saber (Reverse" -> "Cintari Saber (Reverse)"; a lone "(" or ")" is dropped.</summary>

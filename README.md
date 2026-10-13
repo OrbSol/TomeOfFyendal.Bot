@@ -15,6 +15,10 @@ shows next to TCGplayer prices. This repository is the bot only, so it can be re
   and stores those parsed facts.
 - Follows edits and deletions: an edited post is re-parsed, a deleted post is marked removed, including
   posts deleted while the bot was offline. Listings expire after 30 days.
+- Deletes for good: a listing is permanently deleted 7 days after it leaves the board (deleted, edited
+  into something else, or expired). A member's row is deleted once they have no listings, unless they
+  opted out (kept so the opt-out is honoured) or were reported.
+- Respects opt-out: members can remove their data and opt out on the website; their posts are skipped.
 - Reads `#paypal-watchlist`: a post that names **exactly one** member marks that member "reported before".
   A post naming several people changes nothing, so reporters and victims are never marked.
 
@@ -45,10 +49,11 @@ complete list of tables and columns the bot can see.
 | Table | Contents |
 |---|---|
 | `FabDiscordListings` | message/channel/author ids, author display name, post time, type, status, generated summary, flags |
-| `FabDiscordListingItems` | per card line: matched card, set code, finish, condition, price, quantity |
+| `FabDiscordListingItems` | per card line: matched card, set code, finish, condition, special version (Marvel, EA, graded…), price, quantity. Lines that match no card are not stored |
 | `FabDiscordSellers` | author id, first/last seen, opted out, reported before |
 
-It reads (never writes) the card catalog and daily TCGplayer prices, to match card names and to flag an
+It reads (never writes) the card catalog, TCGplayer product names (for new sets the card dataset has not
+added yet) and daily TCGplayer prices, to match card names and to flag an
 ask 25% or more under market for the **same finish**. Its database login has exactly those rights
 ([`deploy/db-access.sql`](deploy/db-access.sql)).
 
@@ -83,6 +88,9 @@ locally; never from tracked files. A pre-commit hook and a CI gitleaks scan guar
 ```powershell
 dotnet user-secrets set "Bot:BotToken" "<token>" --project src/TomeOfFyendal.Bot
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "<connection string>" --project src/TomeOfFyendal.Bot
-dotnet run --project src/TomeOfFyendal.Bot -- --Bot:GuildId=<id> --Bot:ListingChannelIds:0=<id>
+dotnet user-secrets set "Bot:GuildId" "<server id>" --project src/TomeOfFyendal.Bot
+dotnet user-secrets set "Bot:ListingChannelIds:0" "<channel id>" --project src/TomeOfFyendal.Bot
+$env:DOTNET_ENVIRONMENT = 'Development'   # user-secrets are only read in Development
+dotnet run --project src/TomeOfFyendal.Bot
 dotnet test TomeOfFyendal.Bot.slnx
 ```

@@ -136,5 +136,124 @@ namespace TomeOfFyendal.Bot.Tests
             var p = DiscordListingParser.Parse("WTS\nHeart of Fyendal CF $380\nSnatch (red) $3");
             Assert.Equal("WTS · 2 cards · $3 to $380", DiscordListingParser.Summarize(p.Type, p.Items));
         }
+
+        // ---- Shapes seen in the real marketplace channels (re-typed, prices changed) ----
+
+        [Fact]
+        public void Thousands_separators_are_not_decimals()
+        {
+            var p = DiscordListingParser.Parse("WTS OBO\nGem Mint 10 CF Grasp of the Arknight $1,850\nMarvel Malice $2,300.50");
+
+            Assert.Equal(1850m, p.Items[0].Price);
+            Assert.Equal("Grasp of the Arknight", p.Items[0].CardName);
+            Assert.Equal("C", p.Items[0].Foiling);
+            Assert.Equal("Graded", p.Items[0].Variant);
+            Assert.Equal(2300.50m, p.Items[1].Price);
+            Assert.Equal("Marvel", p.Items[1].Variant);
+        }
+
+        [Fact]
+        public void Capital_EA_is_extended_art_and_lowercase_ea_is_each()
+        {
+            var p = DiscordListingParser.Parse("WTS:\nEA CF Flowstate Embodiment - 75usd per\n3x Snatch (red) $2 ea");
+
+            Assert.Equal(2, p.Items.Count);
+            Assert.Equal("Flowstate Embodiment", p.Items[0].CardName);
+            Assert.Equal("EA", p.Items[0].Variant);
+            Assert.Equal(75m, p.Items[0].Price);
+            Assert.Equal("Snatch", p.Items[1].CardName);
+            Assert.Null(p.Items[1].Variant);
+            Assert.Equal(3, p.Items[1].Qty);
+        }
+
+        [Fact]
+        public void Shipping_region_before_the_card_does_not_eat_the_line()
+        {
+            var item = Assert.Single(DiscordListingParser.Parse("WTS CONUS marvel soul harvest - $90 w/tracked shipping").Items);
+
+            Assert.Equal("soul harvest", item.CardName);
+            Assert.Equal("Marvel", item.Variant);
+            Assert.Equal(90m, item.Price);
+        }
+
+        [Fact]
+        public void Header_lines_with_terms_only_add_no_cards()
+        {
+            var p = DiscordListingParser.Parse("WTS CONUS 85% TCGP\nBeckon Steel x2");
+
+            Assert.Equal(ListingType.WTS, p.Type);
+            var item = Assert.Single(p.Items);
+            Assert.Equal("Beckon Steel", item.CardName);
+            Assert.Equal(2, item.Qty);
+            Assert.Equal(85, p.MarketPercent);
+        }
+
+        [Theory]
+        [InlineData("WTS 90% of TCGplayer\nBeckon Steel", 90)]
+        [InlineData("WTS 80% market, shipped\nBeckon Steel", 80)]
+        [InlineData("WTS\nBeckon Steel $5 (50% off)", null)]
+        public void Percent_of_TCGplayer_is_read_from_the_post(string post, int? expected)
+        {
+            Assert.Equal(expected, DiscordListingParser.Parse(post).MarketPercent);
+        }
+
+        [Fact]
+        public void Section_header_sets_finish_and_edition_until_the_next_one()
+        {
+            var p = DiscordListingParser.Parse("WTS\nRF 1st ed:\nReduce to Runechant (Yel) - 5usd per\nOthers:\nArcane Lens $10");
+
+            Assert.Equal(2, p.Items.Count);
+            Assert.Equal("Reduce to Runechant", p.Items[0].CardName);
+            Assert.Equal(("R", "1st", "2"), (p.Items[0].Foiling, p.Items[0].Edition, p.Items[0].Pitch));
+            Assert.Equal(5m, p.Items[0].Price);
+            Assert.Null(p.Items[1].Foiling);
+            Assert.Null(p.Items[1].Edition);
+        }
+
+        [Fact]
+        public void Struck_through_and_sold_lines_are_skipped()
+        {
+            var p = DiscordListingParser.Parse("WTS\n~~CF Shove Off $40~~ SOLD\nNullrune Boots $200\nSpellbane Aegis - sold");
+
+            Assert.Equal("Nullrune Boots", Assert.Single(p.Items).CardName);
+        }
+
+        [Fact]
+        public void A_bare_number_before_OBO_is_the_price()
+        {
+            var item = Assert.Single(DiscordListingParser.Parse("WTS\nCrown of Dominion 1500 OBO").Items);
+
+            Assert.Equal("Crown of Dominion", item.CardName);
+            Assert.Equal(1500m, item.Price);
+        }
+
+        [Fact]
+        public void A_finish_line_with_a_note_is_a_section_header()
+        {
+            var p = DiscordListingParser.Parse("WTS\nGold Foils ( open to trades for other gold foils )\nCrown of Dominion 1500 OBO");
+
+            var item = Assert.Single(p.Items);
+            Assert.Equal("Crown of Dominion", item.CardName);
+            Assert.Equal("G", item.Foiling);
+        }
+
+        [Fact]
+        public void Pitch_before_a_colon_and_euro_decimals_are_read()
+        {
+            var p = DiscordListingParser.Parse("WTS:\n• Staunch Response red Marvel: 70€\n• Waning Moon CF: 6,5€");
+
+            Assert.Equal(("Staunch Response", "1", "Marvel"), (p.Items[0].CardName, p.Items[0].Pitch, p.Items[0].Variant));
+            Assert.Equal((6.5m, "EUR"), (p.Items[1].Price, p.Items[1].Currency));
+        }
+
+        [Fact]
+        public void Grade_in_brackets_is_a_variant_not_part_of_the_name()
+        {
+            var item = Assert.Single(DiscordListingParser.Parse("WTS\nGF Aether Ironweave (psa 9)").Items);
+
+            Assert.Equal("Aether Ironweave", item.CardName);
+            Assert.Equal("G", item.Foiling);
+            Assert.Equal("Graded", item.Variant);
+        }
     }
 }
