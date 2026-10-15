@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using TomeOfFyendal.Bot;
 using TomeOfFyendal.Bot.Data;
 using VaultSharp;
-using VaultSharp.Extensions.Configuration;
 using VaultSharp.V1.AuthMethods.AppRole;
 
 // Flag text formats percentages; the Linux host has no locale, so pin en-US.
@@ -17,22 +16,17 @@ var vaultRoleId = Environment.GetEnvironmentVariable("VAULT_ROLE_ID");
 var vaultSecretId = Environment.GetEnvironmentVariable("VAULT_SECRET_ID");
 if (!string.IsNullOrEmpty(vaultRoleId) && !string.IsNullOrEmpty(vaultSecretId))
 {
-    var vaultUri = builder.Configuration["Vault:Uri"] ?? "http://127.0.0.1:8200";
-    var vaultPath = builder.Configuration["Vault:Path"] ?? "clients/tome-bot";
-    builder.Configuration.AddVaultConfiguration(
-        () => new VaultOptions(vaultUri, new AppRoleAuthMethodInfo(vaultRoleId, vaultSecretId)),
-        vaultPath, "secret");
-
-    // Vault sub-paths arrive as "subpath:key"; map them onto the keys the bot reads.
-    var mapped = new Dictionary<string, string?>();
-    void Map(string vaultKey, string appKey)
+    // Exactly two secrets, read by name (the bot's Vault policy allows only these): its own database
+    // login, and the bot token, shared with the website so a token reset is one update.
+    var vault = new VaultClient(new VaultClientSettings(
+        builder.Configuration["Vault:Uri"] ?? "http://127.0.0.1:8200", new AppRoleAuthMethodInfo(vaultRoleId, vaultSecretId)));
+    async Task<string?> ReadAsync(string path, string key) =>
+        (await vault.V1.Secrets.KeyValue.V2.ReadSecretAsync(path, mountPoint: "secret")).Data.Data.TryGetValue(key, out var v) ? v?.ToString() : null;
+    builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
     {
-        var v = builder.Configuration[vaultKey];
-        if (!string.IsNullOrWhiteSpace(v)) mapped[appKey] = v;
-    }
-    Map("database:ConnectionString", "ConnectionStrings:DefaultConnection");
-    Map("discord:BotToken", "Bot:BotToken");
-    builder.Configuration.AddInMemoryCollection(mapped);
+        ["ConnectionStrings:DefaultConnection"] = await ReadAsync("clients/tome-bot/database", "ConnectionString"),
+        ["Bot:BotToken"] = await ReadAsync("clients/tome/discord", "BotToken"),
+    });
 }
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");

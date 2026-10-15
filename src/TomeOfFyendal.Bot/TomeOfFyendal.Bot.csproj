@@ -14,7 +14,6 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
     <PackageReference Include="VaultSharp" Version="1.13.0.1" />
-    <PackageReference Include="VaultSharp.Extensions.Configuration" Version="1.0.0" />
   </ItemGroup>
 
   <ItemGroup>
