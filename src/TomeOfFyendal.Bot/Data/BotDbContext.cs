@@ -65,6 +65,8 @@ namespace TomeOfFyendal.Bot.Data
         public int ItemCount { get; set; }
         /// <summary>"85% TCGP": cards without their own price are offered at this percent of TCGplayer market.</summary>
         public byte? MarketPercent { get; set; }
+        /// <summary>What MarketPercent is a percent of: null = market, "low" = TCG Low. Column added by the website's AddListingPercentBasis migration.</summary>
+        [StringLength(6)] public string? PercentBasis { get; set; }
         public bool HasImage { get; set; }
         public bool Flagged { get; set; }
         [StringLength(200)] public string? FlagReason { get; set; }

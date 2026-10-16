@@ -194,13 +194,15 @@ namespace TomeOfFyendal.Bot
             listing.RemovedAt = null;
             listing.HasImage = msg.Attachments.Count > 0;
             listing.MarketPercent = (byte?)parsed.MarketPercent;
+            listing.PercentBasis = parsed.PercentBasis;
             listing.UpdatedAt = now;
 
             // Reported first: FlagReason is truncated to 200 characters.
             var flags = new List<string>();
             if (seller.Watchlisted) flags.Add(ReportedFlag);
             if (parsed.HasOffPlatformPayment) flags.Add("payment outside Discord/PayPal G&S");
-            if (parsed.Type == ListingType.WTS && parsed.MarketPercent is int pct && pct <= 100 * (1 - _settings.UnderMarketFlagFraction))
+            // A percent of TCG Low says nothing about market, so only "% of market" can raise this flag.
+            if (parsed.Type == ListingType.WTS && parsed.PercentBasis is null && parsed.MarketPercent is int pct && pct <= 100 * (1 - _settings.UnderMarketFlagFraction))
                 flags.Add($"asks {pct}% of TCGplayer market");
 
             foreach (var (item, resolved) in kept)

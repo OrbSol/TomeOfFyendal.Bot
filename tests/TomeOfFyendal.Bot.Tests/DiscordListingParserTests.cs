@@ -198,6 +198,28 @@ namespace TomeOfFyendal.Bot.Tests
         }
 
         [Fact]
+        public void Percent_of_TCG_Low_on_the_card_line()
+        {
+            var p = DiscordListingParser.Parse("WTS Tome of Fyendal 90% TCGLOW");
+
+            Assert.Equal(ListingType.WTS, p.Type);
+            Assert.Equal("Tome of Fyendal", Assert.Single(p.Items).CardName);
+            Assert.Equal(90, p.MarketPercent);
+            Assert.Equal("low", p.PercentBasis);
+        }
+
+        [Theory]
+        [InlineData("WTS 90% TCG low\nBeckon Steel", "low")]
+        [InlineData("WTS 85% TCGL\nBeckon Steel", "low")]
+        [InlineData("WTS 80% of low\nBeckon Steel", "low")]
+        [InlineData("WTS CONUS 85% TCGP\nBeckon Steel", null)]
+        [InlineData("WTS 90% TCG\nBeckon Steel", null)]
+        public void Percent_basis_is_low_only_when_the_post_says_low(string post, string? basis)
+        {
+            Assert.Equal(basis, DiscordListingParser.Parse(post).PercentBasis);
+        }
+
+        [Fact]
         public void Section_header_sets_finish_and_edition_until_the_next_one()
         {
             var p = DiscordListingParser.Parse("WTS\nRF 1st ed:\nReduce to Runechant (Yel) - 5usd per\nOthers:\nArcane Lens $10");

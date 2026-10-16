@@ -12,7 +12,8 @@ namespace TomeOfFyendal.Bot
         decimal? Price, string Currency, int Qty, byte Confidence, ListingType? LineType, string? Variant = null);
 
     /// <param name="MarketPercent">"85% TCGP": cards without their own price are offered at this percent of TCGplayer market.</param>
-    public sealed record ParsedListing(ListingType Type, IReadOnlyList<ParsedItem> Items, bool HasOffPlatformPayment, int? MarketPercent = null)
+    /// <param name="PercentBasis">"low" when that percent is of TCG Low ("90% TCGLOW"); null for market.</param>
+    public sealed record ParsedListing(ListingType Type, IReadOnlyList<ParsedItem> Items, bool HasOffPlatformPayment, int? MarketPercent = null, string? PercentBasis = null)
     {
         public bool IsEmpty => Type == ListingType.Unknown || Items.Count == 0;
     }
@@ -71,8 +72,9 @@ namespace TomeOfFyendal.Bot
         private static readonly Regex StrikeRx = new(@"~~.*?~~(?:\s*sold(?![a-z]))?", Opt);
         private static readonly Regex SoldRx = new(@"(?<![a-z])sold(?![a-z])", Opt);
         private static readonly Regex EmptyBracketsRx = new(@"\(\s*\)|\[\s*\]", Opt);
-        // "85% TCGP", "90% of TCGplayer", "80% market".
-        private static readonly Regex MarketPercentRx = new(@"(?<![\d.])(?<pct>\d{2,3})\s?%\s?(?:of\s)?(?:tcg(?:p|player)?|market|mkt)(?![a-z])", Opt);
+        // "85% TCGP", "90% of TCGplayer", "80% market"; of TCG Low: "90% TCGLOW", "90% TCG low", "90% TCGL", "90% low".
+        // The low forms come first so "TCG low" isn't read as plain "TCG".
+        private static readonly Regex MarketPercentRx = new(@"(?<![\d.])(?<pct>\d{2,3})\s?%\s?(?:of\s)?(?:(?<low>tcg\s?low|tcgl|low)|tcg(?:p|player)?|market|mkt)(?![a-z])", Opt);
 
         public static ParsedListing Parse(string? content)
         {
@@ -118,8 +120,9 @@ namespace TomeOfFyendal.Bot
             if (type == ListingType.Unknown && items.Any(i => i.LineType.HasValue))
                 type = items.First(i => i.LineType.HasValue).LineType!.Value;
 
-            int? percent = MarketPercentRx.Match(text) is { Success: true } pm && int.TryParse(pm.Groups["pct"].Value, out var pct) && pct is >= 30 and <= 150 ? pct : null;
-            return new ParsedListing(type, items, hasPayment, percent);
+            var pm = MarketPercentRx.Match(text);
+            int? percent = pm.Success && int.TryParse(pm.Groups["pct"].Value, out var pct) && pct is >= 30 and <= 150 ? pct : null;
+            return new ParsedListing(type, items, hasPayment, percent, percent is not null && pm.Groups["low"].Success ? "low" : null);
         }
 
         public static string? NormalizeFoil(string? raw)
@@ -214,7 +217,8 @@ namespace TomeOfFyendal.Bot
 
         private static ParsedItem? ParseLine(string line, ListingType? lineType, string? sectionFoil = null, string? sectionEdition = null)
         {
-            var work = LeadNoiseRx.Replace(line, "");
+            // "90% TCGLOW" on the card's own line is read for the whole post in Parse; keep it out of the name.
+            var work = MarketPercentRx.Replace(LeadNoiseRx.Replace(line, ""), " ");
             byte confidence = 0;
 
             decimal? price = null; var currency = "USD";
