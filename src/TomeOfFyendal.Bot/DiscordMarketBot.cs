@@ -193,6 +193,7 @@ namespace TomeOfFyendal.Bot
             listing.Status = "Active";
             listing.RemovedAt = null;
             listing.HasImage = msg.Attachments.Count > 0;
+            (listing.PhotoUrl, listing.PhotoExpiresAt) = PostPhoto.From(msg.Attachments.Select(a => (a.Url, (string?)a.ContentType)), now);
             listing.MarketPercent = (byte?)parsed.MarketPercent;
             listing.PercentBasis = parsed.PercentBasis;
             listing.UpdatedAt = now;

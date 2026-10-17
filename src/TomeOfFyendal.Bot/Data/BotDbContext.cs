@@ -68,6 +68,9 @@ namespace TomeOfFyendal.Bot.Data
         /// <summary>What MarketPercent is a percent of: null = market, "low" = TCG Low. Column added by the website's AddListingPercentBasis migration.</summary>
         [StringLength(6)] public string? PercentBasis { get; set; }
         public bool HasImage { get; set; }
+        /// <summary>Discord's own link to the post's first picture and when Discord expires it (about a day). The picture is never downloaded. Columns added by the website's AddListingPhoto migration.</summary>
+        [StringLength(1000)] public string? PhotoUrl { get; set; }
+        public DateTime? PhotoExpiresAt { get; set; }
         public bool Flagged { get; set; }
         [StringLength(200)] public string? FlagReason { get; set; }
         public DateTime CreatedAt { get; set; }

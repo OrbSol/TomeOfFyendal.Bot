@@ -21,12 +21,15 @@ shows next to TCGplayer prices. This repository is the bot only, so it can be re
 - Respects opt-out: members can remove their data and opt out on the website; their posts are skipped.
 - Reads `#paypal-watchlist`: a post that names **exactly one** member marks that member "reported before".
   A post naming several people changes nothing, so reporters and victims are never marked.
+- Keeps Discord's own link to a post's first picture, with the expiry Discord puts in that link (about a day).
+  The website shows the picture to signed-in members of the server until then, loading it from Discord.
 
 **Never**
 - Posts, replies, reacts, edits, deletes, pins, DMs or joins voice. There is no code path that sends
   anything to Discord except reading messages.
 - Stores message text. Only the parsed fields and a generated one-line summary ("WTS · 3 cards · $12 to
   $95") are kept. The original post stays in Discord.
+- Downloads, copies or re-hosts pictures. Once Discord's link expires the picture is simply not shown.
 - Lists members, tracks presence or builds profiles. No seller scores or ratings are kept.
 - Uses message content for AI training, or sells or shares data.
 
@@ -48,7 +51,7 @@ complete list of tables and columns the bot can see.
 
 | Table | Contents |
 |---|---|
-| `FabDiscordListings` | message/channel/author ids, author display name, post time, type, status, generated summary, flags |
+| `FabDiscordListings` | message/channel/author ids, author display name, post time, type, status, generated summary, flags, Discord's link to the first picture and its expiry |
 | `FabDiscordListingItems` | per card line: matched card, set code, finish, condition, special version (Marvel, EA, graded…), price, quantity. Lines that match no card are not stored |
 | `FabDiscordSellers` | author id, first/last seen, opted out, reported before |
 
