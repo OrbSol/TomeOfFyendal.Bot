@@ -100,6 +100,39 @@ namespace TomeOfFyendal.Bot.Tests
         }
 
         [Fact]
+        public async Task Extended_art_is_found_by_the_dataset_art_variation_when_TCGplayer_does_not_say_it()
+        {
+            // Crown of Providence: the EA rainbow foil is ANQ005, whose TCGplayer product is just "Crown of Providence".
+            var db = new BotDbContext(new DbContextOptionsBuilder<BotDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+            db.FabCards.Add(new FabCard
+            {
+                UniqueId = "cop", Name = "Crown of Providence",
+                Printings =
+                {
+                    new FabPrinting { PrintingUniqueId = "upr", SetId = "UPR", CardId = "UPR182", Foiling = "R", TcgPlayerProductId = "274734", ArtVariations = "" },
+                    new FabPrinting { PrintingUniqueId = "anq", SetId = "ANQ", CardId = "ANQ005", Foiling = "R", TcgPlayerProductId = "675351", ArtVariations = "AA,AB,EA" },
+                    new FabPrinting { PrintingUniqueId = "pen", SetId = "PEN", CardId = "PEN310", Foiling = "S", TcgPlayerProductId = "675371", ArtVariations = "AA" },
+                    // The golden promo is tagged EA in the dataset, but players call it gold foil.
+                    new FabPrinting { PrintingUniqueId = "gold", SetId = "FAB", CardId = "FAB088", Foiling = "G", TcgPlayerProductId = "278955", ArtVariations = "EA" },
+                },
+            });
+            db.FabTcgProducts.AddRange(
+                new FabTcgProduct { ProductId = 274734, Name = "Crown of Providence", Number = "UPR182", IsSingle = true },
+                new FabTcgProduct { ProductId = 675351, Name = "Crown of Providence", Number = "ANQ005", IsSingle = true },
+                new FabTcgProduct { ProductId = 675371, Name = "Crown of Providence", Number = "PEN310", IsSingle = true },
+                new FabTcgProduct { ProductId = 278955, Name = "Crown of Providence (Golden) - FAB088", Number = "FAB088", IsSingle = true });
+            await db.SaveChangesAsync();
+            var resolver = new FabCardResolver(db, new MemoryCache(new MemoryCacheOptions()));
+
+            async Task<string?> Resolve(string post) => (await resolver.ResolveAsync(DiscordListingParser.Parse(post).Items.Single(), default))?.PrintingUniqueId;
+
+            Assert.Equal("anq", await Resolve("WTS\nCrown Of Providence EA RF $200"));
+            Assert.Equal("anq", await Resolve("WTS\nCrown of Providence EA $200"));      // not the golden one
+            Assert.Equal("gold", await Resolve("WTS\nGold foil Crown of Providence $300"));
+            Assert.Equal("pen", await Resolve("WTS\nCrown of Providence AA $150"));
+        }
+
+        [Fact]
         public async Task A_named_version_missing_from_the_dataset_comes_from_TCGplayer()
         {
             var db = new BotDbContext(new DbContextOptionsBuilder<BotDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);

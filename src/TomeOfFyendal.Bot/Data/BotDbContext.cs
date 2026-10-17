@@ -137,6 +137,8 @@ namespace TomeOfFyendal.Bot.Data
         public string? Foiling { get; set; }
         public string Language { get; set; } = "en";
         public string? TcgPlayerProductId { get; set; }
+        /// <summary>The dataset's art variations, comma-separated ("AA,EA"); filled by the website's catalog import.</summary>
+        public string? ArtVariations { get; set; }
         public bool IsBackFace { get; set; }
         public FabCard? Card { get; set; }
     }

@@ -74,20 +74,24 @@ namespace TomeOfFyendal.Bot
 
             var printings = await _db.FabPrintings.AsNoTracking()
                 .Where(p => p.CardUniqueId == cardUniqueId && p.Language == "en" && !p.IsBackFace)
-                .Select(p => new { p.PrintingUniqueId, p.TcgPlayerProductId, p.SetId, p.Foiling, p.Edition, Name = p.Card!.Name })
+                .Select(p => new { p.PrintingUniqueId, p.TcgPlayerProductId, p.SetId, p.Foiling, p.Edition, p.ArtVariations, Name = p.Card!.Name })
                 .ToListAsync(ct);
 
             var scoped = item.SetCode is null ? printings : printings.Where(p => string.Equals(p.SetId, item.SetCode, StringComparison.OrdinalIgnoreCase)).ToList();
             if (scoped.Count == 0) scoped = printings;
 
-            // "Lexi Marvel", "Crown of Providence EA RF": the named version's printing, recognised by its TCGplayer
-            // product name ("Lexi (Marvel)"). Without one in the dataset, the TCGplayer product with that tag.
+            // "Lexi Marvel", "Crown of Providence EA RF": the named version's printing, recognised by the dataset's
+            // art variations (EA, AA, FA) or its TCGplayer product name ("Lexi (Marvel)"), which also covers Marvel.
+            // Without one in the dataset, the TCGplayer product with that tag.
             var wants = Wants(item.Variant);
             if (wants.Count > 0 && scoped.Count > 0)
             {
                 var tags = await GetProductTagsAsync(ct);
                 bool IsNamed(string? product) => int.TryParse(product, out var id) && tags.TryGetValue(id, out var t) && Named(t, wants);
-                var named = scoped.Where(p => IsNamed(p.TcgPlayerProductId)).ToList();
+                bool HasArt(string? arts) => (arts ?? "").Split(',').Any(wants.Contains);
+                var named = scoped.Where(p => HasArt(p.ArtVariations) || IsNamed(p.TcgPlayerProductId)).ToList();
+                // Golden printings (FAB088) carry the EA tag too, but players call them gold foil, not EA.
+                if (item.Foiling != "G" && named.Any(p => p.Foiling != "G")) named = named.Where(p => p.Foiling != "G").ToList();
                 if (named.Count > 0) scoped = named;
                 else if (await ResolveByProductAsync(item, Normalize(scoped[0].Name), ct) is { } byProduct && IsNamed(byProduct.ProductId?.ToString()))
                     return byProduct;
