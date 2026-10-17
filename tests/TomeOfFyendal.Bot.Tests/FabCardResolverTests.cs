@@ -72,5 +72,22 @@ namespace TomeOfFyendal.Bot.Tests
 
             Assert.Equal("p-yellow", resolved?.PrintingUniqueId);
         }
+
+        [Fact]
+        public async Task A_full_comma_name_wins_over_its_first_word()
+        {
+            var db = new BotDbContext(new DbContextOptionsBuilder<BotDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+            db.FabCards.AddRange(
+                new FabCard { UniqueId = "a", Name = "Arakni", Printings = { new FabPrinting { PrintingUniqueId = "a1", SetId = "DYN", CardId = "DYN001", Foiling = "S" } } },
+                new FabCard { UniqueId = "r", Name = "Arakni, Redback", Printings = { new FabPrinting { PrintingUniqueId = "r1", SetId = "HNT", CardId = "HNT001", Foiling = "S" } } });
+            await db.SaveChangesAsync();
+            var resolver = new FabCardResolver(db, new MemoryCache(new MemoryCacheOptions()));
+
+            var redback = DiscordListingParser.Parse("WTS\nArakni, Redback - HNT - $16").Items.Single();
+            var chatter = DiscordListingParser.Parse("WTS\nArakni, mint, $16").Items.Single();
+
+            Assert.Equal("Arakni, Redback", (await resolver.ResolveAsync(redback, default))?.CardName);
+            Assert.Equal("Arakni", (await resolver.ResolveAsync(chatter, default))?.CardName);
+        }
     }
 }

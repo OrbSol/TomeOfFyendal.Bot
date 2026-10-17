@@ -52,6 +52,10 @@ namespace TomeOfFyendal.Bot
             if (key.Length < 3) return null;
             var index = await GetNameIndexAsync(ct);
             var pitch = item.Pitch;
+            // "Arakni, Redback": the parser cuts at a comma (chatter like "Tunic, NM"); an exact full name wins.
+            if (item.FullName is not null && Normalize(item.FullName) is var full
+                && (index.ContainsKey(full) || (await GetProductIndexAsync(ct)).ContainsKey(full)))
+                key = full;
 
             if (!index.TryGetValue(key, out List<IndexEntry>? entries))
                 (entries, pitch) = WithoutLeadingWords(index, item.CardName, pitch);

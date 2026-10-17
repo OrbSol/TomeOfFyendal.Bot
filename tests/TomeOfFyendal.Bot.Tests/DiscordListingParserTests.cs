@@ -197,6 +197,18 @@ namespace TomeOfFyendal.Bot.Tests
             Assert.Equal(expected, DiscordListingParser.Parse(post).MarketPercent);
         }
 
+        [Theory]
+        [InlineData("WTB Censor x3 $5ea", 3, 5, "USD")]
+        [InlineData("WTS Censor x2 €6 each", 2, 6, "EUR")]
+        [InlineData("WTS Censor 3x $5", 3, 5, "USD")]
+        [InlineData("WTS Censor x3 5$", 3, 5, "USD")]
+        public void Quantity_before_a_symbol_price_is_not_read_as_the_price(string post, int qty, decimal price, string currency)
+        {
+            var item = Assert.Single(DiscordListingParser.Parse(post).Items);
+            Assert.Equal("Censor", item.CardName);
+            Assert.Equal((qty, price, currency), (item.Qty, item.Price, item.Currency));
+        }
+
         [Fact]
         public void Percent_of_TCG_Low_on_the_card_line()
         {
@@ -276,6 +288,70 @@ namespace TomeOfFyendal.Bot.Tests
             Assert.Equal("Aether Ironweave", item.CardName);
             Assert.Equal("G", item.Foiling);
             Assert.Equal("Graded", item.Variant);
+        }
+
+        [Fact]
+        public void A_price_line_with_each_prices_the_cards_above_it_in_the_same_paragraph()
+        {
+            var p = DiscordListingParser.Parse("WTB\nGF Dynastic Diadem\nGF Obsidian Fire Vein\n250€ each\n\nCF War - 30€");
+            Assert.All(p.Items.Take(2), i => Assert.Equal((250m, "EUR"), (i.Price!.Value, i.Currency)));
+            Assert.Equal(30m, p.Items[2].Price);
+
+            var apart = DiscordListingParser.Parse("WTS\nCF Soulshackle FAB120\n\n2 signed artist proofs\n$15 each");
+            Assert.Null(apart.Items[0].Price);
+        }
+
+        [Fact]
+        public void A_price_line_without_each_is_not_shared()
+        {
+            var p = DiscordListingParser.Parse("WTS\nSnatch (red)\n$5 shipping");
+            Assert.Null(Assert.Single(p.Items).Price);
+        }
+
+        [Theory]
+        [InlineData("WTB\n3x deadly spinneret 8", "deadly spinneret", 3, 8)]
+        [InlineData("WTB\n1x flick knives ea 8", "flick knives", 1, 8)]
+        [InlineData("WTB\n1x rf grasp of the arknight 70", "grasp of the arknight", 1, 70)]
+        public void A_bare_number_ending_the_line_is_the_price(string post, string name, int qty, int price)
+        {
+            var item = Assert.Single(DiscordListingParser.Parse(post).Items);
+            Assert.Equal((name, qty, (decimal?)price), (item.CardName, item.Qty, item.Price));
+        }
+
+        [Fact]
+        public void A_set_number_is_not_a_bare_price()
+        {
+            var item = Assert.Single(DiscordListingParser.Parse("WTS\n3x EA deadwood dirge red LGS 363").Items);
+            Assert.Equal("LGS363", item.Number);
+            Assert.Null(item.Price);
+        }
+
+        [Theory]
+        [InlineData("WTS\nRF Cull playset $160", 3, "53.33")]
+        [InlineData("WTS\nRF EA Widespread Ruin playset $150", 3, "50")] // EA is extended art, not "each"
+        [InlineData("WTS\nRF Runic Reaving playset $65 each", 3, "65")]
+        public void A_playset_is_three_copies_priced_per_copy(string post, int qty, string price)
+        {
+            var item = Assert.Single(DiscordListingParser.Parse(post).Items);
+            Assert.Equal((qty, (decimal?)decimal.Parse(price, System.Globalization.CultureInfo.InvariantCulture)), (item.Qty, item.Price));
+        }
+
+        [Fact]
+        public void A_comma_name_keeps_its_full_form_for_the_resolver()
+        {
+            var item = Assert.Single(DiscordListingParser.Parse("WTS\nArakni, Redback (Marvel) - HNT - $16").Items);
+            Assert.Equal("Arakni", item.CardName);
+            Assert.Equal("Arakni, Redback", item.FullName);
+            Assert.Equal("Marvel", item.Variant);
+        }
+
+        [Theory]
+        [InlineData("WTS\nCorrupted Crown CF - GEM Pack 6 - $30", "Corrupted Crown", null)]
+        [InlineData("WTB\nMV Fealty - 100€", "Fealty", "Marvel")]
+        public void Pack_labels_and_MV_are_not_part_of_the_name(string post, string name, string? variant)
+        {
+            var item = Assert.Single(DiscordListingParser.Parse(post).Items);
+            Assert.Equal((name, variant), (item.CardName, item.Variant));
         }
     }
 }
