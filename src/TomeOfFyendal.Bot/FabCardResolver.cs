@@ -79,8 +79,29 @@ namespace TomeOfFyendal.Bot
 
             var scoped = item.SetCode is null ? printings : printings.Where(p => string.Equals(p.SetId, item.SetCode, StringComparison.OrdinalIgnoreCase)).ToList();
             if (scoped.Count == 0) scoped = printings;
+
+            // "Lexi Marvel", "Crown of Providence EA RF": the named version's printing, recognised by its TCGplayer
+            // product name ("Lexi (Marvel)"). Without one in the dataset, the TCGplayer product with that tag.
+            var wants = Wants(item.Variant);
+            if (wants.Count > 0 && scoped.Count > 0)
+            {
+                var tags = await GetProductTagsAsync(ct);
+                bool IsNamed(string? product) => int.TryParse(product, out var id) && tags.TryGetValue(id, out var t) && Named(t, wants);
+                var named = scoped.Where(p => IsNamed(p.TcgPlayerProductId)).ToList();
+                if (named.Count > 0) scoped = named;
+                else if (await ResolveByProductAsync(item, Normalize(scoped[0].Name), ct) is { } byProduct && IsNamed(byProduct.ProductId?.ToString()))
+                    return byProduct;
+            }
             return await PreferAsync(scoped.Select(p => (p.PrintingUniqueId, p.TcgPlayerProductId, p.SetId, p.Foiling, p.Edition, p.Name)), item.Foiling, item.Edition, ct);
         }
+
+        /// <summary>Versions TCGplayer names in brackets ("(Marvel)", "(Extended Art)"); Promo and graded are not among them.</summary>
+        private static HashSet<string> Wants(string? variant) =>
+            (variant ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(v => v is "Marvel" or "EA" or "AA" or "FA").ToHashSet();
+
+        private static bool Named(string tags, HashSet<string> wants) =>
+            (wants.Contains("Marvel") && tags.Contains("marvel")) || (wants.Contains("EA") && tags.Contains("extended art"))
+            || (wants.Contains("AA") && tags.Contains("alternate art")) || (wants.Contains("FA") && tags.Contains("full art"));
 
         /// <summary>
         /// "Atlanta Sink Below", "Tournament pack yellow Warrior's Valor": drops up to three leading words until the
@@ -113,10 +134,8 @@ namespace TomeOfFyendal.Bot
                 (list, pitch) = WithoutLeadingWords(index, item.CardName, pitch);
             if (list is null) return null;
 
-            var wants = (item.Variant ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
-            bool Named(ProductEntry e) =>
-                (wants.Contains("Marvel") && e.Tags.Contains("marvel")) || (wants.Contains("EA") && e.Tags.Contains("extended art"))
-                || (wants.Contains("AA") && e.Tags.Contains("alternate art")) || (wants.Contains("FA") && e.Tags.Contains("full art"));
+            var wants = Wants(item.Variant);
+            bool IsNamed(ProductEntry e) => Named(e.Tags, wants);
             static bool Special(ProductEntry e) =>
                 e.Tags.Contains("marvel") || e.Tags.Contains("extended art") || e.Tags.Contains("alternate art")
                 || e.Tags.Contains("full art") || e.Tags.Contains("korean");
@@ -124,7 +143,7 @@ namespace TomeOfFyendal.Bot
             var byPitch = pitch is null ? list : list.Where(e => e.Pitch == pitch).ToList();
             if (byPitch.Count == 0) byPitch = list;
             // Region exclusives (Korean) only when nothing else carries the named version.
-            var named = byPitch.Where(Named).ToList();
+            var named = byPitch.Where(IsNamed).ToList();
             var pool = named.Where(e => !e.Tags.Contains("korean")).ToList();
             if (pool.Count == 0) pool = named;
             if (pool.Count == 0) pool = byPitch.Where(e => !Special(e)).ToList();
@@ -180,6 +199,14 @@ namespace TomeOfFyendal.Bot
                 }
                 return dict;
             })!;
+
+        /// <summary>TCGplayer product id -> its bracket tags ("marvel | red"), from the product index.</summary>
+        private async Task<Dictionary<int, string>> GetProductTagsAsync(CancellationToken ct) =>
+            (await _cache.GetOrCreateAsync(ProductIndexKey + ":tags", async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
+                return (await GetProductIndexAsync(ct)).Values.SelectMany(l => l).ToDictionary(e => e.ProductId, e => e.Tags);
+            }))!;
 
         private Task<Dictionary<string, List<ProductEntry>>> GetProductIndexAsync(CancellationToken ct) =>
             _cache.GetOrCreateAsync(ProductIndexKey, async entry =>

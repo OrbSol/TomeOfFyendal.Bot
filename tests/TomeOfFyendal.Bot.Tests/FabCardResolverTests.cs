@@ -74,6 +74,48 @@ namespace TomeOfFyendal.Bot.Tests
         }
 
         [Fact]
+        public async Task A_named_version_picks_that_printing_and_a_plain_post_the_regular_one()
+        {
+            var db = new BotDbContext(new DbContextOptionsBuilder<BotDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+            db.FabCards.Add(new FabCard
+            {
+                UniqueId = "lexi", Name = "Lexi",
+                Printings =
+                {
+                    new FabPrinting { PrintingUniqueId = "reg", SetId = "ELE", CardId = "ELE001", Foiling = "S", TcgPlayerProductId = "10" },
+                    new FabPrinting { PrintingUniqueId = "mv", SetId = "PEN", CardId = "PEN001", Foiling = "C", TcgPlayerProductId = "11" },
+                },
+            });
+            db.FabTcgProducts.AddRange(
+                new FabTcgProduct { ProductId = 10, Name = "Lexi", Number = "ELE001", IsSingle = true },
+                new FabTcgProduct { ProductId = 11, Name = "Lexi (Marvel)", Number = "PEN001", IsSingle = true });
+            await db.SaveChangesAsync();
+            var resolver = new FabCardResolver(db, new MemoryCache(new MemoryCacheOptions()));
+
+            var marvel = DiscordListingParser.Parse("WTS\nLexi Marvel $25").Items.Single();
+            var plain = DiscordListingParser.Parse("WTS\nLexi $5").Items.Single();
+
+            Assert.Equal("mv", (await resolver.ResolveAsync(marvel, default))?.PrintingUniqueId);
+            Assert.Equal("reg", (await resolver.ResolveAsync(plain, default))?.PrintingUniqueId);
+        }
+
+        [Fact]
+        public async Task A_named_version_missing_from_the_dataset_comes_from_TCGplayer()
+        {
+            var db = new BotDbContext(new DbContextOptionsBuilder<BotDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+            db.FabCards.Add(new FabCard { UniqueId = "a", Name = "Aurora", Printings = { new FabPrinting { PrintingUniqueId = "reg", SetId = "ROS", CardId = "ROS008", Foiling = "S", TcgPlayerProductId = "20" } } });
+            db.FabTcgProducts.AddRange(
+                new FabTcgProduct { ProductId = 20, Name = "Aurora", Number = "ROS008", IsSingle = true },
+                new FabTcgProduct { ProductId = 21, Name = "Aurora (Marvel)", Number = "ROS008", IsSingle = true });
+            await db.SaveChangesAsync();
+
+            var item = DiscordListingParser.Parse("WTS\nAurora Marvel $90ea").Items.Single();
+            var resolved = await new FabCardResolver(db, new MemoryCache(new MemoryCacheOptions())).ResolveAsync(item, default);
+
+            Assert.Equal(21, resolved?.ProductId);
+        }
+
+        [Fact]
         public async Task A_full_comma_name_wins_over_its_first_word()
         {
             var db = new BotDbContext(new DbContextOptionsBuilder<BotDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
