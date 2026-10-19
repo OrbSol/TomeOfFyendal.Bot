@@ -59,6 +59,7 @@ namespace TomeOfFyendal.Bot
                 {
                     try { await Task.Delay(TimeSpan.FromHours(1), stoppingToken); } catch (OperationCanceledException) { break; }
                     await SafeAsync(() => ExpireOldAsync(stoppingToken), "expire");
+                    await SafeAsync(() => RefreshPhotosAsync(stoppingToken), "photos");
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -136,9 +137,21 @@ namespace TomeOfFyendal.Bot
             var seller = await db.FabDiscordSellers.FindAsync(new object[] { authorId }, ct);
             if (seller?.OptedOut == true) return;
 
+            // The seller replying "bump" to their own post keeps it on the board another ListingExpireDays.
+            if (msg.Reference?.MessageId is { IsSpecified: true } bumped && DiscordListingParser.IsBump(msg.Content))
+            {
+                await BumpAsync(db, unchecked((long)bumped.Value), authorId, msg.Timestamp.UtcDateTime, now, ct);
+                return;
+            }
+
             var parsed = DiscordListingParser.Parse(msg.Content);
             var messageId = unchecked((long)msg.Id);
             var listing = await db.FabDiscordListings.Include(l => l.Items).FirstOrDefaultAsync(l => l.MessageId == messageId, ct);
+
+            // Past its days (counting bumps): an expired listing stays as it is and an old post is not added again,
+            // so the startup re-read never brings back or re-dates what the privacy policy says is gone.
+            var lastActive = listing?.BumpedAt is DateTime b && b > msg.Timestamp.UtcDateTime ? b : msg.Timestamp.UtcDateTime;
+            if (lastActive < now.AddDays(-_settings.ListingExpireDays) && listing?.Status != "Active") return;
 
             // A "W:" line inside a sell post (or "H:" inside a buy post) is a different kind of listing;
             // items carry no type of their own, so those lines are left out rather than mislabelled.
@@ -254,6 +267,46 @@ namespace TomeOfFyendal.Bot
             return MarketPrice.ForFoil(rows.Select(r => (r.SubType, r.Market)), foiling);
         }
 
+        /// <summary>Only the seller can bump; a deleted post stays gone; a bump within the window brings back an expired listing.</summary>
+        private async Task BumpAsync(BotDbContext db, long messageId, long authorId, DateTime at, DateTime now, CancellationToken ct)
+        {
+            var listing = await db.FabDiscordListings.FirstOrDefaultAsync(l => l.MessageId == messageId, ct);
+            if (listing is null || listing.AuthorId != authorId || listing.Status == "Removed") return;
+            if (listing.BumpedAt is DateTime seen && seen >= at) return; // the startup re-read sees bumps again
+            listing.BumpedAt = at;
+            var live = at >= now.AddDays(-_settings.ListingExpireDays);
+            if (listing.Status == "Expired" && live) listing.Status = "Active";
+            // An old bump on an expired listing must not restart its deletion clock.
+            if (listing.Status == "Active") listing.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+        }
+
+        /// <summary>
+        /// Discord's photo links expire about a day after a post is read. For listings still on the board, re-read the
+        /// post shortly before that and keep the fresh link: an ordinary message read, the picture is never fetched.
+        /// </summary>
+        private async Task RefreshPhotosAsync(CancellationToken ct)
+        {
+            if (_client?.ConnectionState != ConnectionState.Connected) return;
+            using var scope = _services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<BotDbContext>();
+            var soon = DateTime.UtcNow.AddHours(3);
+            var due = await db.FabDiscordListings
+                .Where(l => l.Status == "Active" && l.PhotoUrl != null && l.PhotoExpiresAt < soon)
+                .OrderBy(l => l.PhotoExpiresAt).Take(100).ToListAsync(ct);
+            foreach (var l in due)
+            {
+                if (_client.GetChannel(unchecked((ulong)l.ChannelId)) is not IMessageChannel channel) continue;
+                var msg = await channel.GetMessageAsync(unchecked((ulong)l.MessageId));
+                if (msg is null) continue; // deleted: the delete handling takes care of it
+                (l.PhotoUrl, l.PhotoExpiresAt) = PostPhoto.From(msg.Attachments.Select(a => (a.Url, (string?)a.ContentType)), DateTime.UtcNow);
+                await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+            }
+            if (due.Count == 0) return;
+            await db.SaveChangesAsync(ct);
+            _logger.LogInformation("Renewed photo links for {Count} listings", due.Count);
+        }
+
         private async Task MarkRemovedAsync(ulong messageId, CancellationToken ct)
         {
             using var scope = _services.CreateScope();
@@ -270,9 +323,9 @@ namespace TomeOfFyendal.Bot
             var db = scope.ServiceProvider.GetRequiredService<BotDbContext>();
             var cutoff = DateTime.UtcNow.AddDays(-_settings.ListingExpireDays);
             var now = DateTime.UtcNow;
-            var n = await db.FabDiscordListings.Where(l => l.Status == "Active" && l.PostedAt < cutoff)
+            var n = await db.FabDiscordListings.Where(l => l.Status == "Active" && (l.BumpedAt ?? l.PostedAt) < cutoff)
                 .ExecuteUpdateAsync(s => s.SetProperty(l => l.Status, "Expired").SetProperty(l => l.UpdatedAt, now), ct);
-            if (n > 0) _logger.LogInformation("Expired {Count} listings older than {Days} days", n, _settings.ListingExpireDays);
+            if (n > 0) _logger.LogInformation("Expired {Count} listings not posted or bumped in {Days} days", n, _settings.ListingExpireDays);
 
             // Retention promised in the privacy policy: off the board for PurgeAfterDays -> deleted (items cascade).
             // A seller row survives only while it has listings, an opt-out to honour, or a report.

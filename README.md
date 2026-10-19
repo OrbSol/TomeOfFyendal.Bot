@@ -14,22 +14,25 @@ shows next to TCGplayer prices. This repository is the bot only, so it can be re
   to cards from the open [the-fab-cube](https://github.com/the-fab-cube/flesh-and-blood-cards) dataset,
   and stores those parsed facts.
 - Follows edits and deletions: an edited post is re-parsed, a deleted post is marked removed, including
-  posts deleted while the bot was offline. Listings expire after 30 days.
+  posts deleted while the bot was offline. Listings expire 10 days after the post or its latest bump.
+- Follows bumps: the seller replying "bump" to their own post keeps it up another 10 days (and brings back an
+  expired listing within its 7 days). Nobody else can bump someone's post.
 - Deletes for good: a listing is permanently deleted 7 days after it leaves the board (deleted, edited
   into something else, or expired). A member's row is deleted once they have no listings, unless they
   opted out (kept so the opt-out is honoured) or were reported.
 - Respects opt-out: members can remove their data and opt out on the website; their posts are skipped.
 - Reads `#paypal-watchlist`: a post that names **exactly one** member marks that member "reported before".
   A post naming several people changes nothing, so reporters and victims are never marked.
-- Keeps Discord's own link to a post's first picture, with the expiry Discord puts in that link (about a day).
-  The website shows the picture to signed-in members of the server until then, loading it from Discord.
+- Keeps Discord's own link to a post's first picture. Discord expires these links after about a day, so while
+  the listing is on the board the bot re-reads the post shortly before that and keeps the fresh link. The website
+  shows the picture to signed-in members of the server, loading it from Discord.
 
 **Never**
 - Posts, replies, reacts, edits, deletes, pins, DMs or joins voice. There is no code path that sends
   anything to Discord except reading messages.
 - Stores message text. Only the parsed fields and a generated one-line summary ("WTS · 3 cards · $12 to
   $95") are kept. The original post stays in Discord.
-- Downloads, copies or re-hosts pictures. Once Discord's link expires the picture is simply not shown.
+- Downloads, copies or re-hosts pictures. Once a listing leaves the board its picture link is no longer renewed.
 - Lists members, tracks presence or builds profiles. No seller scores or ratings are kept.
 - Uses message content for AI training, or sells or shares data.
 

@@ -86,6 +86,11 @@ namespace TomeOfFyendal.Bot
         // The low forms come first so "TCG low" isn't read as plain "TCG".
         private static readonly Regex MarketPercentRx = new(@"(?<![\d.])(?<pct>\d{2,3})\s?%\s?(?:of\s)?(?:(?<low>tcg\s?low|tcgl|low)|tcg(?:p|player)?|market|mkt)(?![a-z])", Opt);
 
+        private static readonly Regex BumpRx = new(@"(?<![a-z])bump(?:ed|ing)?(?![a-z])", Opt);
+
+        /// <summary>"bump", "Bump!", "bumping :)": a short reply that keeps a post up. A longer reply is a conversation.</summary>
+        public static bool IsBump(string? content) => content is { Length: > 0 and <= 40 } && BumpRx.IsMatch(content);
+
         public static ParsedListing Parse(string? content)
         {
             if (string.IsNullOrWhiteSpace(content))

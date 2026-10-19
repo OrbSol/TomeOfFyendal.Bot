@@ -11,8 +11,8 @@ namespace TomeOfFyendal.Bot
         public ulong? WatchlistChannelId { get; set; }
         /// <summary>How far back to read the listing channels on startup.</summary>
         public int BackfillDays { get; set; } = 30;
-        /// <summary>Listings older than this many days are marked Expired.</summary>
-        public int ListingExpireDays { get; set; } = 30;
+        /// <summary>Listings not posted or bumped (the seller replying "bump") in this many days are marked Expired.</summary>
+        public int ListingExpireDays { get; set; } = 10;
         /// <summary>Removed and expired listings are deleted for good this many days after they leave the board (privacy policy).</summary>
         public int PurgeAfterDays { get; set; } = 7;
         /// <summary>Flag asks this far under the TCGplayer market (fraction).</summary>

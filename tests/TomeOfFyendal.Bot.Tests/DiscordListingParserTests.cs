@@ -290,6 +290,18 @@ namespace TomeOfFyendal.Bot.Tests
             Assert.Equal("Graded", item.Variant);
         }
 
+        [Theory]
+        [InlineData("bump", true)]
+        [InlineData("Bump!", true)]
+        [InlineData("bumping :)", true)]
+        [InlineData("BUMPED", true)]
+        [InlineData("bumper sleeves for sale?", false)]
+        [InlineData("Is this still available? I'd love to bump into you at the next event and trade", false)] // a conversation
+        [InlineData("", false)]
+        [InlineData(null, false)]
+        public void A_short_bump_reply_is_a_bump(string? reply, bool bump) =>
+            Assert.Equal(bump, DiscordListingParser.IsBump(reply));
+
         [Fact]
         public void A_price_line_with_each_prices_the_cards_above_it_in_the_same_paragraph()
         {

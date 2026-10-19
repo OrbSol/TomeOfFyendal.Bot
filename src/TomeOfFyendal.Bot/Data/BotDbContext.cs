@@ -53,6 +53,8 @@ namespace TomeOfFyendal.Bot.Data
         [StringLength(100)] public string? ChannelName { get; set; }
         public DateTime PostedAt { get; set; }
         public DateTime? EditedAt { get; set; }
+        /// <summary>Latest "bump" reply by the seller; the listing expires ListingExpireDays after this or PostedAt. Column added by the website's AddListingBumpedAt migration.</summary>
+        public DateTime? BumpedAt { get; set; }
         /// <summary>WTS, WTB or WTT.</summary>
         [Required, StringLength(4)] public string Type { get; set; } = "WTS";
         public long AuthorId { get; set; }
